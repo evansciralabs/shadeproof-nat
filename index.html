@@ -1564,8 +1564,11 @@ window.SHADEPROOF_COVERAGE = {"schema_version": "0.1.0", "generated": "2026-10-1
  * All three stack bottom-up from the 0.5-inch baseline, no gaps, no crowding.
  */
 
-const PDF_LIB = window['pdfjs-dist/build/pdf'];
-PDF_LIB.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// PDF.js is optional (offline-first). Never throw at load if CDN is blocked.
+const PDF_LIB = window['pdfjs-dist/build/pdf'] || window.pdfjsLib || null;
+if (PDF_LIB && PDF_LIB.GlobalWorkerOptions) {
+  PDF_LIB.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 
 // --- STATE MANAGEMENT ---
 const State = {
@@ -2136,6 +2139,11 @@ async function loadFile(file) {
     if(State.doc) await State.doc.destroy();
     
     const bufferClone = State.fileBuffer.slice(0);
+    if (!PDF_LIB) {
+      UI.log('PDF VIEWER OFFLINE — install/vend libraries or go online; DOCX draft still works', 'err');
+      UI.setStatus('PDF OFFLINE', false);
+      return;
+    }
     State.doc = await PDF_LIB.getDocument(bufferClone).promise;
     try {
       const p1 = await State.doc.getPage(1);
@@ -3093,12 +3101,9 @@ const HostBridge = (function () {
     } catch (_) {}
     // Venue promotion: state and/or courtId
     try {
-      if (hint.courtId && Venue && typeof Venue.select === 'function') {
-        Venue.select(String(hint.courtId));
-      } else if (hint.state && Venue && typeof Venue.promoteState === 'function') {
-        Venue.promoteState(String(hint.state));
-      } else if (hint.state && Venue && Venue.picker) {
-        // soft path: store preferred state for picker sort
+      if (hint.courtId && Venue && typeof Venue.set === 'function') {
+        Venue.set({ court: String(hint.courtId) }, { engaged: true });
+      } else if (hint.state && Venue) {
         Venue._hintState = String(hint.state).toUpperCase();
       }
     } catch (e) {
@@ -3183,7 +3188,6 @@ document.addEventListener('keydown', (e) => {
 <div id="public-footer" style="position:fixed;bottom:0;left:0;right:0;z-index:5;padding:6px 12px;font:10px/1.4 system-ui,sans-serif;color:#8b949e;background:rgba(13,17,23,.92);border-top:1px solid #30363d;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
   <span>SHADEPROOF · NAT — form rules sourced from public court materials; not legal advice; not human-confirmed.</span>
   <a href="privacy.html" style="color:#58a6ff;">Privacy</a>
-  <a href="https://github.com/" id="repo-link" style="color:#58a6ff;display:none;">Source</a>
 </div>
 </body>
 </html>
