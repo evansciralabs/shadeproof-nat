@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — SHADEPROOF · NAT</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif;
+         background: #0d1117; color: #e6edf3; max-width: 40rem; margin-inline: auto;
+         padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 .5rem; }
+  h2 { font-size: 1.05rem; margin: 1.75rem 0 .5rem; color: #58a6ff; }
+  p, li { color: #c9d1d9; }
+  a { color: #58a6ff; }
+  .meta { color: #8b949e; font-size: .9rem; margin-bottom: 1.5rem; }
+  ul { padding-left: 1.2rem; }
+  code { font: 0.9em ui-monospace, monospace; background: #161b22; padding: .1em .35em; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <p class="meta"><a href="./">← Back to SHADEPROOF · NAT</a></p>
+  <h1>Privacy &amp; data handling</h1>
+  <p class="meta">Last updated: 2026-10-16 · Applies to the public web build of SHADEPROOF · NAT</p>
+
+  <p>SHADEPROOF · NAT is a <strong>browser-only</strong> legal form-rule reference and draft tool. It is not a law firm, not a filing service, and not legal advice.</p>
+
+  <h2>What we collect</h2>
+  <p><strong>Nothing on a server of ours.</strong> This site is static files (typically GitHub Pages). There is no Shadeproof account, no login, and no backend that receives your documents.</p>
+
+  <h2>What stays on your device</h2>
+  <ul>
+    <li><strong>Preferences</strong> (for example last venue selection) may be stored in your browser’s <code>localStorage</code> so the page remembers settings between visits.</li>
+    <li><strong>PDFs and draft text</strong> you open or type are processed in the browser memory of your session. They are not uploaded to Shadeproof.</li>
+    <li>Clearing site data for this origin removes those local preferences.</li>
+  </ul>
+
+  <h2>Third-party scripts (when you are online)</h2>
+  <p>If you use the optional PDF viewer or PDF stamp features, the page may load libraries from public CDNs:</p>
+  <ul>
+    <li><code>cdnjs.cloudflare.com</code> — pdf.js</li>
+    <li><code>unpkg.com</code> — pdf-lib</li>
+  </ul>
+  <p>Those requests are made by your browser to those providers under their own terms. The core rule checker and DOCX draft export do not require them and work offline once the page itself is loaded.</p>
+  <p>Display fonts are not loaded from Google Fonts in this build; the UI uses system fonts.</p>
+
+  <h2>Analytics &amp; tracking</h2>
+  <p>This public build is intended to ship <strong>without</strong> analytics, ad tags, or fingerprinting scripts. If that ever changes, this page will be updated before any such code is added.</p>
+
+  <h2>When Shadeproof is opened inside another app</h2>
+  <p>A host dashboard (for example a local SRC dashboard) may open Shadeproof in a frame and send draft text or a venue hint through the browser’s <code>postMessage</code> API. That traffic stays between the host page and Shadeproof in your browser. The host application’s own privacy policy applies to anything it stores or transmits.</p>
+
+  <h2>Court rules data</h2>
+  <p>Formatting and e-filing rule summaries are compiled from publicly available court rules and related official materials. They are machine-sourced for convenience, <strong>not human-confirmed for every court</strong>, and can lag behind amendments. Always verify against the court before filing.</p>
+
+  <h2>Children</h2>
+  <p>This tool is aimed at adults preparing court documents. It is not directed at children under 13.</p>
+
+  <h2>Contact</h2>
+  <p>For privacy questions about this static site, use the contact method listed in the GitHub repository that hosts it.</p>
+
+  <p class="meta" style="margin-top:2rem;"><a href="./">← Back to SHADEPROOF · NAT</a></p>
+</body>
+</html>
