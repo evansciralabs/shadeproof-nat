@@ -1788,7 +1788,7 @@ const UI = {
 // =============================================================================
 const Venue = {
   bundle: window.SHADEPROOF_COVERAGE || null,
-  FALLBACK: 'us-wawd',
+  FALLBACK: null,  // national: no court until user picks (avoid WDWA-centric guess)
   DOC_LABELS: {
     any: 'Any filing (general rules)', complaint: 'Complaint', pleading: 'Pleading', motion: 'Motion',
     response: 'Response / opposition', reply: 'Reply', brief_trial: 'Trial-court brief',
@@ -1831,8 +1831,24 @@ const Venue = {
       this.recents = ShadeVenues.createRecents(this.store);
       await this.recents.load();
       const last = await ShadeVenues.loadLast(this.store);
-      const start = ShadeVenues.pickDefault(this.index, { last, fallbackId: this.FALLBACK });
-      await this.set(start, { engaged: false });
+      // National public build: restore last venue if present; otherwise leave blank
+      // (no regional guess). FALLBACK is null on purpose.
+      let start = null;
+      if (last && last.court && this.index.byId[last.court]) {
+        start = last;
+      } else if (this.FALLBACK && this.index.byId[this.FALLBACK]) {
+        start = ShadeVenues.pickDefault(this.index, { last: null, fallbackId: this.FALLBACK });
+      }
+      if (start) {
+        await this.set(start, { engaged: false });
+      } else {
+        this.sel = { court: null, division: null, judge: null };
+        this.profile = this.emptyProfile();
+        this.$('venue-name').textContent = 'Select a venue';
+        this.renderRules();
+        this.refreshStampPlan();
+        UI.log('SELECT A VENUE TO LOAD RULES', 'sys');
+      }
       UI.log(`COVERAGE LOADED: ${this.index.items.length} COURTS / ${Object.keys(this.bundle.rule_sets).length} RULE SETS`, 'sys');
     } catch(e) {
       console.error(e);
