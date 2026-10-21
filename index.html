@@ -11,13 +11,15 @@
      PDF view/stamp uses vendored pdf.js 3.11.174 + pdf-lib 1.17.1 under vendor/.
      CDN is only a fallback when SHADEPROOF_ALLOW_CDN === true (not in dashboard sandbox). -->
 <script>
-window.SHADEPROOF_FEATURES = { pdfjs: false, pdflib: false, offline: true, vendor: false };
+window.SHADEPROOF_FEATURES = { pdfjs: false, pdflib: false, jszip: false, offline: true, vendor: false };
 (function loadOptionalPdf() {
   if (window.SHADEPROOF_FORCE_OFFLINE) return; // explicit hard offline
 
   var VENDOR_PDFJS = 'vendor/pdfjs/pdf.min.js';
   var VENDOR_WORKER = 'vendor/pdfjs/pdf.worker.min.js';
   var VENDOR_PDFLIB = 'vendor/pdf-lib/pdf-lib.min.js';
+  var VENDOR_JSZIP = 'vendor/jszip/jszip.min.js';
+  var CDN_JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
   var CDN_PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
   var CDN_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   var CDN_PDFLIB = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
@@ -91,6 +93,20 @@ window.SHADEPROOF_FEATURES = { pdfjs: false, pdflib: false, offline: true, vendo
       markPdflib();
       refreshOfflineFlag();
       if (typeof refreshPdfCapabilityNote === 'function') refreshPdfCapabilityNote();
+    });
+  });
+
+  // JSZip — DOCX import (text extract)
+  tag(VENDOR_JSZIP, function () {
+    window.SHADEPROOF_FEATURES.jszip = !!window.JSZip;
+  }, function () {
+    var allowCdn = window.SHADEPROOF_ALLOW_CDN === true;
+    var inFrame = window.parent && window.parent !== window;
+    if (!allowCdn && inFrame) return;
+    if (!allowCdn && !inFrame) allowCdn = true;
+    if (!allowCdn) return;
+    tag(CDN_JSZIP, function () {
+      window.SHADEPROOF_FEATURES.jszip = !!window.JSZip;
     });
   });
 })();
@@ -867,11 +883,11 @@ footer {
     </div>
 
     <div class="flex-row">
-      <input type="file" id="inp-file" accept=".pdf" class="hidden">
+      <input type="file" id="inp-file" accept=".pdf,.docx,.txt,.md,.text,.markdown,.csv,.log,.rtf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden">
       
       <div id="btn-group-load">
         <button class="btn btn-primary" onclick="document.getElementById('inp-file').click()">
-          <span>Load PDF</span>
+          <span>Load PDF / DOCX / TXT</span>
         </button>
       </div>
       <div id="btn-group-close" class="hidden">
@@ -1018,20 +1034,23 @@ footer {
 
       <div class="input-group" style="margin-top: 10px;">
         <span class="input-label">DRAFT BODY (from dashboard / scratchpad)</span>
-        <textarea id="inp-body" rows="8" placeholder="Paste or receive draft body text here. This becomes the body of the formatted DOCX first draft." style="resize: vertical; min-height: 100px;"></textarea>
+        <textarea id="inp-body" rows="8" placeholder="Paste notes, import .txt/.md/.docx, or receive handoff from the dashboard. Export as DOCX or PDF when ready." style="resize: vertical; min-height: 100px;"></textarea>
       </div>
 
-      <div class="flex-row" style="margin-top: 12px;">
-        <button class="btn w-full" id="btn-docx" style="justify-content: center;" title="Generate a Word draft with margins, font, spacing, and caption from the selected venue rules">
-          EXPORT DOCX DRAFT
+      <div class="flex-row" style="margin-top: 12px; gap: 6px;">
+        <button class="btn w-full" id="btn-docx" style="justify-content: center;" title="Word draft with venue form rules">
+          EXPORT DOCX
+        </button>
+        <button class="btn w-full" id="btn-pdf-draft" style="justify-content: center;" title="Build a PDF from draft fields + venue margins/fonts (pdf-lib)">
+          EXPORT PDF DRAFT
         </button>
       </div>
       <div class="flex-row" style="margin-top: 8px;">
         <button class="btn w-full" id="btn-preview" style="justify-content: center;">
           REFRESH PREVIEW
         </button>
-        <button class="btn btn-primary w-full" id="btn-download" style="justify-content: center;">
-          STAMP PDF (online)
+        <button class="btn btn-primary w-full" id="btn-download" style="justify-content: center;" title="Stamp loaded PDF, or build from draft then stamp">
+          STAMP PDF
         </button>
       </div>
       <div class="text-xs text-mute" id="pdf-capability-note" style="margin-top:6px;"></div>
@@ -1141,7 +1160,7 @@ footer {
     <div id="standby-screen">
       <div class="standby-icon">⬢</div>
       <div class="standby-text">SYSTEM READY // AWAITING INPUT</div>
-      <div class="standby-sub">Drag & Drop PDF or Click Load</div>
+      <div class="standby-sub">Drag &amp; drop PDF, DOCX, or text notes · or click Load</div>
     </div>
 
     <div id="drop-overlay">
@@ -2509,56 +2528,240 @@ const Picker = {
 };
 
 // --- CORE LOGIC ---
-async function loadFile(file) {
-  if(!file) return;
-  UI.log(`LOADING: ${file.name.toUpperCase()}`, 'sys');
-  UI.setStatus('DECRYPTING...', true);
-  
-  const sizeMB = (file.size / (1024*1024)).toFixed(2);
-  UI.els.mSize.textContent = `${sizeMB} MB`;
+function isPdfFile(file) {
+  if (!file) return false;
+  var n = (file.name || '').toLowerCase();
+  var t = (file.type || '').toLowerCase();
+  return t === 'application/pdf' || n.endsWith('.pdf');
+}
+function isDocxFile(file) {
+  if (!file) return false;
+  var n = (file.name || '').toLowerCase();
+  var t = (file.type || '').toLowerCase();
+  return n.endsWith('.docx') ||
+    t === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    t === 'application/docx';
+}
+/** Plain notes from any app — land in the draft workstation (same path as DOCX import). */
+function isPlainTextFile(file) {
+  if (!file) return false;
+  var n = (file.name || '').toLowerCase();
+  var t = (file.type || '').toLowerCase();
+  if (t === 'text/plain' || t === 'text/markdown' || t === 'text/x-markdown') return true;
+  // Extension allowlist (MIME is often empty on desktop drops)
+  var exts = ['.txt', '.text', '.md', '.markdown', '.csv', '.tsv', '.log', '.rtf'];
+  // RTF is not pure plain text but we still read as text for a usable first pass
+  for (var i = 0; i < exts.length; i++) {
+    if (n.endsWith(exts[i])) return true;
+  }
+  return false;
+}
+function isDraftImportFile(file) {
+  return isDocxFile(file) || isPlainTextFile(file);
+}
+
+/** Extract plain text from a .docx ArrayBuffer (needs JSZip). */
+async function extractDocxText(buffer) {
+  if (typeof JSZip === 'undefined') {
+    throw new Error('JSZip not loaded — cannot read DOCX (vendor/jszip missing?)');
+  }
+  var zip = await JSZip.loadAsync(buffer);
+  var entry = zip.file('word/document.xml');
+  if (!entry) throw new Error('Not a valid DOCX (missing word/document.xml)');
+  var xml = await entry.async('string');
+
+  function decodeEntities(s) {
+    return String(s)
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+  }
+  function runsFromBlock(block) {
+    // Soft breaks inside a paragraph
+    var work = block.replace(/<w:br\b[^/]*\/>/gi, '\n').replace(/<w:tab\b[^/]*\/>/gi, '\t');
+    var parts = [];
+    // Split into run chunks to detect bold
+    var re = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/gi;
+    var m, any = false;
+    while ((m = re.exec(work)) !== null) {
+      any = true;
+      var run = m[1];
+      var bold = /<w:b\s*\/>|<w:b\s[^>]*\/?>|<w:bCs\s*\/>/i.test(run);
+      var texts = [];
+      var tr = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+      var tm;
+      while ((tm = tr.exec(run)) !== null) texts.push(decodeEntities(tm[1]));
+      if (texts.length) {
+        var t = texts.join('');
+        // Markdown-ish bold for structure (draft body is plain textarea)
+        if (bold && t.trim()) parts.push('**' + t + '**');
+        else parts.push(t);
+      }
+    }
+    if (!any) {
+      var texts2 = [];
+      var tr2 = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+      var tm2;
+      while ((tm2 = tr2.exec(work)) !== null) texts2.push(decodeEntities(tm2[1]));
+      if (texts2.length) parts.push(texts2.join(''));
+    }
+    return parts.join('');
+  }
+
+  var blocks = xml.split(/<\/w:p>/i);
+  var paras = [];
+  blocks.forEach(function (block) {
+    if (!/<w:p[\s>]/i.test(block)) return;
+    var style = '';
+    var sm = block.match(/<w:pStyle[^>]*w:val="([^"]+)"/i);
+    if (sm) style = String(sm[1]).toLowerCase();
+    var line = runsFromBlock(block);
+    // List / numbering hint
+    var isList = /<w:numPr\b/i.test(block);
+    if (isList && line.trim()) line = '• ' + line.replace(/^\s+/, '');
+    // Heading styles → visible structure in plain draft
+    if (/heading\s*1|title|heading1/i.test(style) && line.trim()) {
+      line = line.trim().toUpperCase();
+    } else if (/heading\s*2|heading2/i.test(style) && line.trim()) {
+      line = line.trim();
+    } else if (/heading/i.test(style) && line.trim()) {
+      line = line.trim();
+    }
+    // Centered caption-ish lines stay as-is
+    paras.push(line);
+  });
+  // Collapse 3+ blank lines to 2
+  var out = [];
+  var blankRun = 0;
+  paras.forEach(function (p) {
+    if (!p || !String(p).trim()) {
+      blankRun++;
+      if (blankRun <= 2) out.push('');
+    } else {
+      blankRun = 0;
+      out.push(p);
+    }
+  });
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('\n');
+}
+
+async function loadDocxFile(file) {
+  var buf = await file.arrayBuffer();
+  var text = await extractDocxText(buf);
+  var bodyEl = document.getElementById('inp-body');
+  if (bodyEl) bodyEl.value = text;
+  State.fileName = file.name;
+  State.fileBuffer = null;
+  State.doc = null;
+  State.facts = { bytes: file.size, widthIn: null, heightIn: null, textItems: null, kind: 'docx' };
+  UI.els.mSize.textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+  UI.els.mVer.textContent = 'DOCX';
+  UI.els.mProd.textContent = 'IMPORTED TEXT';
+  // Open draft panel so user sees body
+  try {
+    if (typeof PanelUX !== 'undefined' && PanelUX.openPanel) PanelUX.openPanel('panel-draft');
+  } catch (_) {}
+  UI.log('DOCX IMPORTED → draft body (' + text.length + ' chars). Export DOCX/PDF or edit, then stamp when ready.', 'ok');
+  UI.setStatus('DOCX LOADED', true);
+  // Standby stays until a PDF is in the viewer; that's OK
+  if (UI.els.standby) UI.els.standby.classList.remove('hidden');
+}
+
+
+async function loadTextFile(file) {
+  var text = await file.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  var lower = (file.name || '').toLowerCase();
+  if (lower.endsWith('.rtf') || /^\{\\rtf/i.test(text.trim())) {
+    text = text
+      .replace(/\\par[d]?/gi, '\n')
+      .replace(/\\'[0-9a-fA-F]{2}/g, '')
+      .replace(/\\[a-z]+\-?\d* ?/gi, '')
+      .replace(/[{}]/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+  var bodyEl = document.getElementById('inp-body');
+  if (bodyEl) bodyEl.value = text;
+  State.fileName = file.name;
+  State.fileBuffer = null;
+  State.doc = null;
+  State.facts = { bytes: file.size, widthIn: null, heightIn: null, textItems: null, kind: 'text' };
+  if (UI.els.mSize) UI.els.mSize.textContent = (file.size / 1024).toFixed(1) + ' KB';
+  if (UI.els.mVer) UI.els.mVer.textContent = 'TEXT';
+  if (UI.els.mProd) UI.els.mProd.textContent = 'IMPORTED NOTES';
+  try {
+    if (typeof PanelUX !== 'undefined' && PanelUX.openPanel) PanelUX.openPanel('panel-draft');
+  } catch (_) {}
+  UI.log('TEXT IMPORTED → draft body (' + text.length + ' chars) from ' + file.name + '. Prepare as DOCX/PDF or stamp when ready.', 'ok');
+  UI.setStatus('TEXT LOADED', true);
+  if (UI.els.standby) UI.els.standby.classList.remove('hidden');
+}
+
+async function loadPdfFile(file) {
+  State.fileBuffer = await file.arrayBuffer();
+  State.fileName = file.name;
+  State.textItems = {};
+  State.fullScanPending = true;
+  State.facts = { bytes: file.size, widthIn: null, heightIn: null, textItems: null, kind: 'pdf' };
+  if (State.doc) await State.doc.destroy();
+
+  const bufferClone = State.fileBuffer.slice(0);
+  if (!PDF_LIB) {
+    UI.log('PDF VIEWER OFFLINE — vendor pdf.js or allow CDN; DOCX export still works', 'err');
+    UI.setStatus('PDF OFFLINE', false);
+    return;
+  }
+  State.doc = await PDF_LIB.getDocument(bufferClone).promise;
+  try {
+    const p1 = await State.doc.getPage(1);
+    const vp1 = p1.getViewport({ scale: 1.0 });
+    State.facts.widthIn = vp1.width / 72;
+    State.facts.heightIn = vp1.height / 72;
+  } catch (e) { /* paper check will stay blank */ }
 
   try {
-    State.fileBuffer = await file.arrayBuffer();
-    State.fileName = file.name;
-    State.textItems = {};
-    State.fullScanPending = true;
-    State.facts = { bytes: file.size, widthIn: null, heightIn: null, textItems: null };
-    if(State.doc) await State.doc.destroy();
-    
-    const bufferClone = State.fileBuffer.slice(0);
-    if (!PDF_LIB) {
-      UI.log('PDF VIEWER OFFLINE — install/vend libraries or go online; DOCX draft still works', 'err');
-      UI.setStatus('PDF OFFLINE', false);
+    const metaData = await State.doc.getMetadata();
+    UI.els.mVer.textContent = metaData.info.PDFFormatVersion || '1.4';
+    UI.els.mProd.textContent = metaData.info.Producer || 'UNKNOWN';
+    UI.els.mProd.title = metaData.info.Producer || '';
+  } catch (e) { UI.els.mVer.textContent = 'N/A'; }
+
+  State.currentPage = 1;
+  State.autoFit = true;
+
+  UI.log('LOADED ' + State.doc.numPages + ' PAGES', 'ok');
+  UI.enable();
+  Venue.updateFileChecks();
+  render();
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  UI.log('LOADING: ' + String(file.name || '').toUpperCase(), 'sys');
+  UI.setStatus('LOADING...', true);
+  try {
+    if (isDocxFile(file)) {
+      await loadDocxFile(file);
       return;
     }
-    State.doc = await PDF_LIB.getDocument(bufferClone).promise;
-    try {
-      const p1 = await State.doc.getPage(1);
-      const vp1 = p1.getViewport({ scale: 1.0 });
-      State.facts.widthIn = vp1.width / 72;
-      State.facts.heightIn = vp1.height / 72;
-    } catch(e) { /* paper check will stay blank */ }
-    
-    try {
-      const metaData = await State.doc.getMetadata();
-      UI.els.mVer.textContent = metaData.info.PDFFormatVersion || '1.4';
-      UI.els.mProd.textContent = metaData.info.Producer || 'UNKNOWN';
-      UI.els.mProd.title = metaData.info.Producer || ''; 
-    } catch(e) { UI.els.mVer.textContent = 'N/A'; }
-
-    State.currentPage = 1;
-    State.autoFit = true; 
-    
-    UI.log(`LOADED ${State.doc.numPages} PAGES`, 'ok');
-    UI.enable();
-    Venue.updateFileChecks();
-    render();
-  } catch(err) {
+    if (isPlainTextFile(file)) {
+      await loadTextFile(file);
+      return;
+    }
+    if (isPdfFile(file)) {
+      await loadPdfFile(file);
+      return;
+    }
+    UI.log('UNSUPPORTED FILE — use PDF, DOCX, or plain text (.txt / .md)', 'err');
+    UI.setStatus('BAD TYPE', false);
+  } catch (err) {
     console.error(err);
-    UI.log('FILE ERROR: CORRUPT OR ENCRYPTED', 'err');
+    UI.log('FILE ERROR: ' + (err && err.message ? err.message : 'CORRUPT OR UNSUPPORTED'), 'err');
     UI.setStatus('ERROR', false);
   }
 }
+
 
 async function closeDocument() {
   if(State.doc) {
@@ -2730,6 +2933,180 @@ function drawComplianceElements(ctx, w, h) {
 // DOWNLOAD ENGINE (PDF-LIB)
 // Same stacking logic mirrored in PDF coordinate space (y inverted).
 // =============================================================================
+
+/** Build a PDF from draft fields using venue form (pdf-lib). Returns Uint8Array. */
+async function buildPdfFromDraft() {
+  if (!window.SHADEPROOF_FEATURES || !window.SHADEPROOF_FEATURES.pdflib || typeof PDFLib === 'undefined') {
+    throw new Error('pdf-lib not available');
+  }
+  var form = (typeof DocxDraft !== 'undefined' && DocxDraft.resolvedForm)
+    ? DocxDraft.resolvedForm()
+    : { top: 1, bottom: 1, left: 1, right: 1, fontPt: 12, line: 480, pageW: 12240, pageH: 15840, paper: 'letter', fontFamily: 'Times New Roman' };
+
+  var caseNo = (UI.els.inpCase && UI.els.inpCase.value) || '';
+  var title = (UI.els.inpTitle && UI.els.inpTitle.value) || '';
+  var atty = (UI.els.inpAtty && UI.els.inpAtty.value) || '';
+  var bodyEl = document.getElementById('inp-body');
+  var body = (bodyEl && bodyEl.value) || '';
+  if (!body && window.SHADEPROOF_HINT && window.SHADEPROOF_HINT.body) body = String(window.SHADEPROOF_HINT.body);
+
+  var { PDFDocument, StandardFonts, rgb } = PDFLib;
+  var pdfDoc = await PDFDocument.create();
+  // Map form font preference to StandardFonts
+  var ff = String(form.fontFamily || '').toLowerCase();
+  var font = await pdfDoc.embedFont(
+    /arial|helvetica|sans/.test(ff) ? StandardFonts.Helvetica : StandardFonts.TimesRoman
+  );
+  var fontBold = await pdfDoc.embedFont(
+    /arial|helvetica|sans/.test(ff) ? StandardFonts.HelveticaBold : StandardFonts.TimesRomanBold
+  );
+
+  var pageW = (form.paper === 'legal') ? 612 : 612;
+  var pageH = (form.paper === 'legal') ? 1008 : 792;
+  var marginL = (Number(form.left) || 1) * 72;
+  var marginR = (Number(form.right) || 1) * 72;
+  var marginTFirst = (Number(form.topFirst != null ? form.topFirst : form.top) || 1) * 72;
+  var marginTOther = (Number(form.topOther != null ? form.topOther : form.top) || 1) * 72;
+  if (marginTFirst < marginTOther) marginTFirst = marginTOther;
+  var marginT = marginTFirst; // start on first page
+  var marginB = (Number(form.bottom) || 1) * 72;
+  var fontSize = Number(form.fontPt) || 12;
+  // line spacing: form.line is twips-ish 240/360/480 → multiplier
+  var lineMult = 2.0;
+  if (form.line <= 240) lineMult = 1.0;
+  else if (form.line <= 360) lineMult = 1.5;
+  var lineH = fontSize * lineMult * 1.15;
+  var maxWidth = pageW - marginL - marginR;
+
+  function wrapLine(text, fnt, size) {
+    var words = String(text || '').split(/\s+/);
+    var lines = [];
+    var cur = '';
+    words.forEach(function (w) {
+      var trial = cur ? cur + ' ' + w : w;
+      if (fnt.widthOfTextAtSize(trial, size) > maxWidth && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = trial;
+    });
+    if (cur) lines.push(cur);
+    if (!lines.length) lines.push('');
+    return lines;
+  }
+
+  var lines = [];
+  // Caption from templates
+  var courtName = 'COURT';
+  try {
+    if (Venue && Venue.sel && Venue.sel.court && Venue.bundle && Venue.bundle.courts[Venue.sel.court]) {
+      courtName = Venue.bundle.courts[Venue.sel.court].name || courtName;
+    }
+  } catch (_) {}
+  var tpl = (typeof CaptionTemplates !== 'undefined')
+    ? CaptionTemplates.template(CaptionTemplates.courtInfo())
+    : { headings: [courtName], caseLabel: 'Case No.' };
+  (tpl.headings || [courtName]).forEach(function (h) {
+    wrapLine(h, fontBold, fontSize).forEach(function (ln) {
+      lines.push({ text: ln, bold: true, align: 'center' });
+    });
+  });
+  lines.push({ text: '', bold: false });
+  if (caseNo) lines.push({ text: (tpl.caseLabel || 'Case No.') + ' ' + caseNo, bold: false, align: 'right' });
+  if (title) {
+    title.split(/\n/).forEach(function (t) {
+      wrapLine(t, fontBold, fontSize).forEach(function (ln) {
+        lines.push({ text: ln, bold: true, align: 'center' });
+      });
+    });
+  }
+  lines.push({ text: '', bold: false });
+  if (body) {
+    body.split(/\n/).forEach(function (para) {
+      if (!para.trim()) { lines.push({ text: '', bold: false }); return; }
+      wrapLine(para, font, fontSize).forEach(function (ln) {
+        lines.push({ text: ln, bold: false, align: 'left' });
+      });
+    });
+  } else {
+    lines.push({ text: '[Draft body empty — paste text or import DOCX]', bold: false });
+  }
+  if (atty) {
+    lines.push({ text: '', bold: false });
+    lines.push({ text: 'Respectfully submitted,', bold: false });
+    lines.push({ text: '', bold: false });
+    atty.split(/\n/).forEach(function (a) {
+      lines.push({ text: a, bold: false, align: 'left' });
+    });
+  }
+
+  var page = pdfDoc.addPage([pageW, pageH]);
+  var pageIndex = 0;
+  var y = pageH - marginTFirst - fontSize;
+  lines.forEach(function (item) {
+    if (y < marginB + fontSize) {
+      page = pdfDoc.addPage([pageW, pageH]);
+      pageIndex++;
+      y = pageH - marginTOther - fontSize;
+    }
+    if (item.text === '') {
+      y -= lineH * 0.5;
+      return;
+    }
+    var f = item.bold ? fontBold : font;
+    var x = marginL;
+    if (item.align === 'center') {
+      var w = f.widthOfTextAtSize(item.text, fontSize);
+      x = marginL + (maxWidth - w) / 2;
+    } else if (item.align === 'right') {
+      var w2 = f.widthOfTextAtSize(item.text, fontSize);
+      x = pageW - marginR - w2;
+    }
+    page.drawText(item.text, { x: x, y: y, size: fontSize, font: f, color: rgb(0, 0, 0) });
+    y -= lineH;
+  });
+
+  return pdfDoc.save();
+}
+
+async function exportPdfDraft() {
+  try {
+    UI.log('BUILDING PDF DRAFT from venue form rules...', 'sys');
+    var bytes = await buildPdfFromDraft();
+    var blob = new Blob([bytes], { type: 'application/pdf' });
+    var a = document.createElement('a');
+    var safe = ((UI.els.inpCase && UI.els.inpCase.value) || 'draft').replace(/[^\w.\-]+/g, '_').slice(0, 60);
+    a.href = URL.createObjectURL(blob);
+    a.download = 'SHADEPROOF_' + safe + '_draft.pdf';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    // Keep buffer so STAMP PDF can run without re-import
+    State.fileBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    State.fileName = a.download;
+    State.facts = State.facts || {};
+    State.facts.kind = 'pdf-draft';
+    UI.log('PDF DRAFT DOWNLOADED — click STAMP PDF to apply line numbers/footer if required', 'ok');
+    UI.setStatus('PDF DRAFT READY', true);
+    // Try load into viewer
+    try {
+      if (PDF_LIB) {
+        if (State.doc) await State.doc.destroy();
+        State.doc = await PDF_LIB.getDocument(State.fileBuffer.slice(0)).promise;
+        State.currentPage = 1;
+        State.autoFit = true;
+        UI.enable();
+        render();
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  } catch (err) {
+    console.error(err);
+    UI.log('PDF DRAFT FAILED: ' + err.message, 'err');
+    UI.setStatus('PDF ERR', false);
+  }
+}
+
 async function downloadPdf() {
   if (!window.SHADEPROOF_FEATURES || !window.SHADEPROOF_FEATURES.pdflib || typeof PDFLib === 'undefined') {
     UI.log('PDF STAMP UNAVAILABLE OFFLINE — use EXPORT DOCX DRAFT, or go online / vendor pdf-lib', 'err');
@@ -2737,20 +3114,37 @@ async function downloadPdf() {
     return;
   }
   if(!State.fileBuffer) {
-    UI.log('ERROR: NO DOCUMENT LOADED', 'err');
-    UI.setStatus('NO FILE', false);
-    
-    const loadBtn = document.querySelector('#btn-group-load button');
-    if(loadBtn) {
-        const originalColor = loadBtn.style.borderColor;
-        loadBtn.style.borderColor = 'var(--status-err)';
-        loadBtn.style.color = 'var(--status-err)';
-        setTimeout(() => {
-            loadBtn.style.borderColor = originalColor;
-            loadBtn.style.color = '';
-        }, 500);
+    // No PDF yet — build from draft body if any, then stamp
+    var bodyEl = document.getElementById('inp-body');
+    var hasDraft = (bodyEl && bodyEl.value && bodyEl.value.trim()) ||
+      (UI.els.inpTitle && UI.els.inpTitle.value) ||
+      (UI.els.inpCase && UI.els.inpCase.value);
+    if (hasDraft) {
+      UI.log('NO PDF LOADED — building from draft fields, then stamping...', 'sys');
+      try {
+        var bytes = await buildPdfFromDraft();
+        State.fileBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        State.fileName = State.fileName || 'shadeproof_draft.pdf';
+      } catch (e) {
+        UI.log('COULD NOT BUILD DRAFT PDF: ' + e.message, 'err');
+        UI.setStatus('NO FILE', false);
+        return;
+      }
+    } else {
+      UI.log('ERROR: NO PDF LOADED AND NO DRAFT TEXT — load PDF/DOCX or fill draft body', 'err');
+      UI.setStatus('NO FILE', false);
+      const loadBtn = document.querySelector('#btn-group-load button');
+      if(loadBtn) {
+          const originalColor = loadBtn.style.borderColor;
+          loadBtn.style.borderColor = 'var(--status-err)';
+          loadBtn.style.color = 'var(--status-err)';
+          setTimeout(() => {
+              loadBtn.style.borderColor = originalColor;
+              loadBtn.style.color = '';
+          }, 500);
+      }
+      return;
     }
-    return;
   }
 
   UI.log('INITIATING COMPLIANCE STAMP...', 'sys');
@@ -3294,14 +3688,20 @@ const PanelUX = (function () {
     var dock = document.createElement('div');
     dock.id = 'sidebar-action-dock';
     dock.innerHTML =
-      '<button type="button" class="btn" id="dock-btn-docx" title="Export Word draft using venue form rules">EXPORT DOCX DRAFT</button>' +
-      '<button type="button" class="btn btn-primary" id="dock-btn-pdf" title="Stamp PDF when libraries available">STAMP PDF</button>' +
-      '<div class="text-xs text-mute" style="text-align:center;">Primary actions stay here — expand sections above as needed</div>';
+      '<button type="button" class="btn" id="dock-btn-docx" title="Export Word draft">EXPORT DOCX</button>' +
+      '<button type="button" class="btn" id="dock-btn-pdf-draft" title="PDF from draft + venue form rules">EXPORT PDF DRAFT</button>' +
+      '<button type="button" class="btn btn-primary" id="dock-btn-pdf" title="Stamp loaded PDF or draft-built PDF">STAMP PDF</button>' +
+      '<div class="text-xs text-mute" style="text-align:center;">Import PDF/DOCX · export draft · stamp when ready</div>';
     sidebar.appendChild(dock);
     document.getElementById('dock-btn-docx').addEventListener('click', function () {
       var b = document.getElementById('btn-docx');
       if (b) b.click();
       else if (typeof exportDocxDraft === 'function') exportDocxDraft();
+    });
+    document.getElementById('dock-btn-pdf-draft').addEventListener('click', function () {
+      var b = document.getElementById('btn-pdf-draft');
+      if (b) b.click();
+      else if (typeof exportPdfDraft === 'function') exportPdfDraft();
     });
     document.getElementById('dock-btn-pdf').addEventListener('click', function () {
       var b = document.getElementById('btn-download');
@@ -3480,7 +3880,9 @@ document.body.ondragover  = (e) => { e.preventDefault(); UI.els.drop.classList.a
 document.body.ondragleave = (e) => { if(!e.relatedTarget) UI.els.drop.classList.remove('active'); };
 document.body.ondrop = (e) => {
   e.preventDefault(); UI.els.drop.classList.remove('active');
-  if(e.dataTransfer.files[0]?.type === 'application/pdf') loadFile(e.dataTransfer.files[0]);
+  var f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && (isPdfFile(f) || isDraftImportFile(f))) loadFile(f);
+  else if (f) UI.log('UNSUPPORTED DROP — PDF, DOCX, or text (.txt/.md)', 'err');
 };
 
 document.getElementById('btn-prev').onclick = () => { if(State.currentPage > 1) { State.currentPage--; render(); }};
@@ -4064,10 +4466,9 @@ const DocxDraft = (function () {
     var pageNums = false;
     var pn = ruleVal(r, 'page_numbers.required');
     if (pn === true || pn === 'true' || pn === 'required') pageNums = true;
-    // Draft uses the larger top when first-page top exceeds other pages (common 3" caption rule)
-    var topUsed = (isFinite(topFirst) && topFirst > top) ? topFirst : top;
+    // top/topOther = continuing-page margin; topFirst = first-page only (caption rules e.g. 3 in)
     var form = {
-      top: topUsed, topFirst: topFirst, topOther: topOther,
+      top: topOther, topFirst: topFirst, topOther: topOther,
       bottom: bottom, left: left, right: right,
       fontPt: fontPt, fontFamily: fontFamily, line: line,
       pageW: pageW, pageH: pageH, paper: paper, spacing: spacing,
@@ -4111,10 +4512,16 @@ const DocxDraft = (function () {
     var tpl = (typeof CaptionTemplates !== 'undefined')
       ? CaptionTemplates.template(meta.courtInfo || CaptionTemplates.courtInfo())
       : { headings: [meta.courtName || 'COURT'], caseLabel: 'Case No.', titleHint: '' };
+    // First-page-only top: leading spacer; page margin stays topOther for pages 2+
+    var firstExtra = 0;
+    if (isFinite(form.topFirst) && isFinite(form.topOther) && form.topFirst > form.topOther) {
+      firstExtra = inToTwip(form.topFirst - form.topOther);
+    }
     // Court caption headings (centered, bold)
     (tpl.headings || [meta.courtName || 'COURT']).forEach(function (line, i, arr) {
       parts.push(para(line, {
         bold: true, align: 'center', size: half, line: form.line, fontFamily: ff,
+        before: i === 0 ? firstExtra : 0,
         after: i === arr.length - 1 ? 200 : 40
       }));
     });
@@ -4210,7 +4617,7 @@ const DocxDraft = (function () {
       disc += ' Includes USER WORKING VALUES for gaps or forced overrides — not official court rules.';
     }
     if (form.topFirst && form.topOther && form.topFirst > form.topOther) {
-      disc += ' First-page top margin (' + form.topFirst + ' in) applied as section top for this draft; other pages may use ' + form.topOther + ' in per rule — adjust section breaks in Word if needed.';
+      disc += ' First-page top ' + form.topFirst + ' in via leading spacer; continuing pages use page margin ' + form.topOther + ' in (true first-page-only top).';
     }
     disc += ' —';
     parts.push(para(disc, { size: 16, line: 240, fontFamily: ff, after: 0 }));
@@ -4405,6 +4812,7 @@ setTimeout(refreshPdfCapabilityNote, 4000);
 
 document.getElementById('btn-download').onclick = downloadPdf;
 document.getElementById('btn-docx').onclick = exportDocxDraft;
+document.getElementById('btn-pdf-draft').onclick = exportPdfDraft;
 
 
 document.getElementById('btn-clear-fields').onclick = () => {
