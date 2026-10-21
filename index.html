@@ -156,6 +156,25 @@ body.ghost-mode .hub-link:hover { background: #e8eaed; }
 body.ghost-mode input[type="text"], body.ghost-mode textarea, body.ghost-mode select { background: #ffffff; color: #202124; }
 body.ghost-mode input[type="text"]::placeholder, body.ghost-mode textarea::placeholder { color: #9aa0a6; }
 body.ghost-mode #console-output { background: #f8f9fa; border-top: 1px solid var(--border); }
+body.ghost-mode #sidebar-action-dock {
+  background: linear-gradient(180deg, transparent 0%, #ffffff 28%);
+  border-top-color: var(--border);
+}
+body.ghost-mode .panel-block { border-bottom-color: var(--border); }
+body.ghost-mode .panel-title { color: #5f6368; }
+body.ghost-mode .panel-title:hover { color: #202124; }
+body.ghost-mode .wv-grid input,
+body.ghost-mode .wv-grid select,
+body.ghost-mode .wv-row2 input,
+body.ghost-mode .wv-row2 select,
+body.ghost-mode .wv-notes textarea {
+  background: #ffffff; color: #202124; border-color: var(--border);
+}
+body.ghost-mode .btn { background: #f1f3f4; color: #202124; border-color: var(--border); }
+body.ghost-mode .btn-primary { background: #3d5afe; color: #fff; border-color: #3d5afe; }
+body.ghost-mode .venue-btn { background: #f8f9fa; border-color: var(--border); color: #202124; }
+body.ghost-mode header, body.ghost-mode #app-header { background: #ffffff; border-color: var(--border); }
+
 body.ghost-mode #standby-screen { background: radial-gradient(circle at center, #ffffff 0%, #e8eaed 70%); }
 body.ghost-mode .standby-icon { color: #dadce0; text-shadow: 0 0 30px rgba(61, 90, 254, 0.3); }
 body.ghost-mode .standby-text { color: #80868b; }
@@ -1189,7 +1208,7 @@ footer {
   </div>
 </div>
 
-<!-- coverage data generated 2026-10-20: 510 courts, 492 rule sets. Built 2026-10-20. -->
+<!-- coverage data generated 2026-10-21: 510 courts, 492 rule sets. Built 2026-10-21. -->
 <!-- Coverage loaded at runtime from coverage.bundle.js or coverage.bundle.json -->
 <script>
 /**
@@ -1833,7 +1852,7 @@ const State = {
   stamp: { case: '', title: '', atty: '' },
 
   load() {
-    const saved = localStorage.getItem('shadeproof_cfg_v4');
+    const saved = localStorage.getItem('shadeproof_cfg_v5');
     if(saved) {
       const cfg = JSON.parse(saved);
       this.sidebarOpen = cfg.sidebarOpen ?? true;
@@ -1852,7 +1871,7 @@ const State = {
       gridOffset: this.gridOffset,
       gridLines: this.gridLines
     };
-    localStorage.setItem('shadeproof_cfg_v4', JSON.stringify(cfg));
+    localStorage.setItem('shadeproof_cfg_v5', JSON.stringify(cfg));
   }
 };
 
@@ -1921,20 +1940,31 @@ const UI = {
   },
 
   applyState() {
-    if(!State.sidebarOpen) this.els.sidebar.classList.add('collapsed');
-    else this.els.sidebar.classList.remove('collapsed');
-
-    if(State.ghostMode) document.body.classList.add('ghost-mode');
+    // Re-query in case DOM was not ready at first els capture
+    var side = this.els.sidebar || document.getElementById('main-sidebar');
+    this.els.sidebar = side;
+    if (side) {
+      if (!State.sidebarOpen) side.classList.add('collapsed');
+      else side.classList.remove('collapsed');
+    }
+    if (State.ghostMode) document.body.classList.add('ghost-mode');
     else document.body.classList.remove('ghost-mode');
 
-    this.els.chkGrid.checked = State.layers.grid;
-    this.els.chkMargin.checked = State.layers.margin;
-    this.els.chkRuler.checked = State.layers.ruler;
-    
-    this.els.rngOffset.value = State.gridOffset;
-    this.els.valOffset.textContent = (State.gridOffset > 0 ? '+' : '') + State.gridOffset + 'px';
-    this.els.rngDensity.value = State.gridLines;
-    this.els.valDensity.textContent = State.gridLines + ' LINES';
+    try {
+      if (this.els.chkGrid) this.els.chkGrid.checked = State.layers.grid;
+      if (this.els.chkMargin) this.els.chkMargin.checked = State.layers.margin;
+      if (this.els.chkRuler) this.els.chkRuler.checked = State.layers.ruler;
+      if (this.els.rngOffset) {
+        this.els.rngOffset.value = State.gridOffset;
+        if (this.els.valOffset)
+          this.els.valOffset.textContent = (State.gridOffset > 0 ? '+' : '') + State.gridOffset + 'px';
+      }
+      if (this.els.rngDensity) {
+        this.els.rngDensity.value = State.gridLines;
+        if (this.els.valDensity)
+          this.els.valDensity.textContent = State.gridLines + ' LINES';
+      }
+    } catch (e) { /* chrome-only init */ }
   },
 
   log(msg, type = 'sys') {
@@ -3089,7 +3119,7 @@ function createTick(parent, x, y, w, h, label, isTop) {
 
 // --- SIDEBAR PANEL ACCORDION (minimize scroll; focus one step) ---
 const PanelUX = (function () {
-  var KEY = 'shadeproof.panels.v1';
+  var KEY = 'shadeproof.panels.v2';
   // Default: only venue + draft open. Everything else collapsed.
   var DEFAULT_OPEN = {
     'panel-venue': true,
@@ -3322,6 +3352,33 @@ function loadScript(src) {
   });
 }
 
+
+// --- Chrome controls (do not wait on coverage) ---
+function bindChromeControls() {
+  function on(id, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.onclick = fn;
+  }
+  on('btn-toggle-sidebar', function () {
+    if (UI && UI.toggleSidebar) UI.toggleSidebar();
+  });
+  on('btn-help', function () {
+    if (UI && UI.toggleHelp) UI.toggleHelp();
+  });
+  on('btn-ghost', function () {
+    if (UI && UI.toggleGhostMode) UI.toggleGhostMode();
+  });
+  on('btn-close', function () {
+    if (typeof closeDocument === 'function') closeDocument();
+  });
+  // Immediate visual apply from saved state
+  try {
+    if (typeof State !== 'undefined' && State.load) State.load();
+    if (UI && UI.applyState) UI.applyState();
+  } catch (e) {}
+}
+
 async function ensureCoverage() {
   if (window.SHADEPROOF_COVERAGE) {
     Venue.bundle = window.SHADEPROOF_COVERAGE;
@@ -3354,8 +3411,12 @@ async function ensureCoverage() {
 }
 
 // --- EVENT LISTENERS (after coverage is ready) ---
+// Bind menu / theme immediately (coverage may still be loading)
+try { bindChromeControls(); } catch (e) { console.warn(e); }
+
 ensureCoverage().then(function (info) {
   if (info && info.source) console.info('SHADEPROOF coverage source:', info.source);
+  try { bindChromeControls(); } catch (e) {}
   UI.init();
   Venue.init();
   if (typeof WorkingValues !== 'undefined') WorkingValues.bind();
@@ -4326,6 +4387,7 @@ document.getElementById('btn-clear-fields').onclick = () => {
   }
 }).catch(function (err) {
   console.error('SHADEPROOF boot failed', err);
+  try { bindChromeControls(); if (UI && UI.init) UI.init(); } catch (e2) {}
 });
 
 
