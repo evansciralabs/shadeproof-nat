@@ -2135,7 +2135,17 @@ const Venue = {
     this.$('sel-doctype').onchange = (e) => this.set({ ...this.sel, docType: e.target.value }, { engaged: true });
     this.$('sel-division').onchange = (e) => this.set({ ...this.sel, division: e.target.value || null }, { engaged: true });
     this.$('sel-judge').onchange = (e) => this.set({ ...this.sel, judge: e.target.value || null }, { engaged: true });
-    this.$('btn-rules-toggle').onclick = () => { this.rulesOpen = !this.rulesOpen; this.renderRules(); };
+    this.$('btn-rules-toggle').onclick = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      this.rulesOpen = !this.rulesOpen;
+      // Panel body must be open or the list stays invisible inside collapsed accordion
+      try {
+        if (typeof PanelUX !== 'undefined' && PanelUX.openPanel) PanelUX.openPanel('panel-rules');
+        var block = document.getElementById('panel-rules');
+        if (block) block.classList.remove('collapsed');
+      } catch (_) {}
+      this.renderRules();
+    };
     this.$('chk-force-footer').onchange = (e) => { this.forceFooter = e.target.checked; this.refreshStampPlan(); render(); };
   },
 
@@ -3119,11 +3129,11 @@ function createTick(parent, x, y, w, h, label, isTop) {
 
 // --- SIDEBAR PANEL ACCORDION (minimize scroll; focus one step) ---
 const PanelUX = (function () {
-  var KEY = 'shadeproof.panels.v2';
+  var KEY = 'shadeproof.panels.v3';
   // Default: only venue + draft open. Everything else collapsed.
   var DEFAULT_OPEN = {
     'panel-venue': true,
-    'panel-rules': false,
+    'panel-rules': true,
     'panel-working': false,
     'panel-uplinks': false,
     'panel-draft': true,
@@ -3187,13 +3197,21 @@ const PanelUX = (function () {
         node = next;
       }
       block.appendChild(body);
-      // chevron
+      // chevron + explicit toggle label
       if (!title.querySelector('.panel-chevron')) {
         var ch = document.createElement('span');
         ch.className = 'panel-chevron';
         ch.setAttribute('aria-hidden', 'true');
         ch.textContent = '▼';
         title.appendChild(ch);
+      }
+      if (!title.querySelector('.panel-toggle-lbl')) {
+        var tl = document.createElement('span');
+        tl.className = 'panel-toggle-lbl';
+        tl.textContent = 'HIDE';
+        // insert before chevron
+        var chev = title.querySelector('.panel-chevron');
+        title.insertBefore(tl, chev);
       }
       // collapsed one-line summary
       if (!block.querySelector('.panel-summary')) {
@@ -3212,7 +3230,11 @@ const PanelUX = (function () {
     if (!block) return;
     block.classList.toggle('collapsed', !open);
     var title = block.querySelector('.panel-title');
-    if (title) title.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (title) {
+      title.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var lbl = title.querySelector('.panel-toggle-lbl');
+      if (lbl) lbl.textContent = open ? 'HIDE' : 'SHOW';
+    }
     if (block.id && state) {
       state[block.id] = open;
       saveState(state);
@@ -3371,6 +3393,18 @@ function bindChromeControls() {
   });
   on('btn-close', function () {
     if (typeof closeDocument === 'function') closeDocument();
+  });
+  on('btn-rules-toggle', function (e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    try {
+      if (Venue && typeof Venue.rulesOpen === 'boolean') {
+        Venue.rulesOpen = !Venue.rulesOpen;
+        if (typeof PanelUX !== 'undefined' && PanelUX.openPanel) PanelUX.openPanel('panel-rules');
+        var block = document.getElementById('panel-rules');
+        if (block) block.classList.remove('collapsed');
+        if (Venue.renderRules) Venue.renderRules();
+      }
+    } catch (err) { console.warn(err); }
   });
   // Immediate visual apply from saved state
   try {
